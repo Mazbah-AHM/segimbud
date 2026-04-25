@@ -11,7 +11,7 @@ import {
     formatAreaKm2,
     formatPercent,
     grayscaleArrayFromBase64,
-    imageDataFromSource,
+    imageDataFromBase64,
     refreshGlobalHealth,
     renderMaskDataUrl,
     renderOverlayDataUrl,
@@ -23,37 +23,37 @@ import {
 const legend = window.SEGIMBUD_CONFIG.legend || [];
 
 const elements = {
-    form: document.getElementById("scene-form"),
-    file: document.getElementById("scene-file"),
-    resolution: document.getElementById("scene-resolution"),
-    tileSize: document.getElementById("scene-tile-size"),
-    tileOverlap: document.getElementById("scene-tile-overlap"),
-    forceTiled: document.getElementById("scene-force-tiled"),
-    overlayAlpha: document.getElementById("scene-overlay-alpha"),
-    confidenceThreshold: document.getElementById("scene-confidence-threshold"),
-    classToggles: document.getElementById("scene-class-toggles"),
-    selectAll: document.getElementById("scene-select-all"),
-    resetButton: document.getElementById("scene-reset-button"),
-    runButton: document.getElementById("scene-run-button"),
-    runStatus: document.getElementById("scene-run-status"),
-    stageImage: document.getElementById("scene-stage-image"),
-    emptyState: document.getElementById("scene-empty-state"),
-    previewOriginal: document.getElementById("scene-preview-original"),
-    previewMask: document.getElementById("scene-preview-mask"),
-    previewConfidence: document.getElementById("scene-preview-confidence"),
-    stageLabel: document.getElementById("scene-stage-label"),
-    viewButtons: [...document.querySelectorAll("#scene-view-switcher [data-view]")],
-    metricsRibbon: document.getElementById("scene-metrics-ribbon"),
-    runtimeStack: document.getElementById("scene-runtime-stack"),
-    areaSummary: document.getElementById("scene-area-summary"),
-    insights: document.getElementById("scene-insights"),
-    legendWell: document.getElementById("scene-legend"),
-    statsGrid: document.getElementById("scene-stats-grid"),
-    downloadMask: document.getElementById("scene-download-mask"),
-    downloadClassMask: document.getElementById("scene-download-class-mask"),
-    downloadHeatmap: document.getElementById("scene-download-heatmap"),
-    downloadStats: document.getElementById("scene-download-stats"),
-    downloadReport: document.getElementById("scene-download-report"),
+    form: document.getElementById("coordinate-form"),
+    latitude: document.getElementById("coordinate-latitude"),
+    longitude: document.getElementById("coordinate-longitude"),
+    areaKm: document.getElementById("coordinate-area-km"),
+    searchDays: document.getElementById("coordinate-search-days"),
+    cloudCover: document.getElementById("coordinate-cloud-cover"),
+    classToggles: document.getElementById("coordinate-class-toggles"),
+    selectAll: document.getElementById("coordinate-select-all"),
+    resetButton: document.getElementById("coordinate-reset-button"),
+    runButton: document.getElementById("coordinate-run-button"),
+    runStatus: document.getElementById("coordinate-run-status"),
+    stageImage: document.getElementById("coordinate-stage-image"),
+    emptyState: document.getElementById("coordinate-empty-state"),
+    previewOriginal: document.getElementById("coordinate-preview-original"),
+    previewMask: document.getElementById("coordinate-preview-mask"),
+    previewConfidence: document.getElementById("coordinate-preview-confidence"),
+    stageLabel: document.getElementById("coordinate-stage-label"),
+    viewButtons: [...document.querySelectorAll("#coordinate-view-switcher [data-view]")],
+    metricsRibbon: document.getElementById("coordinate-metrics-ribbon"),
+    runtimeStack: document.getElementById("coordinate-runtime-stack"),
+    sourceStack: document.getElementById("coordinate-source-stack"),
+    areaSummary: document.getElementById("coordinate-area-summary"),
+    insights: document.getElementById("coordinate-insights"),
+    legendWell: document.getElementById("coordinate-legend"),
+    statsGrid: document.getElementById("coordinate-stats-grid"),
+    downloadReport: document.getElementById("coordinate-download-report"),
+    downloadSource: document.getElementById("coordinate-download-source"),
+    downloadMask: document.getElementById("coordinate-download-mask"),
+    downloadClassMask: document.getElementById("coordinate-download-class-mask"),
+    downloadHeatmap: document.getElementById("coordinate-download-heatmap"),
+    downloadStats: document.getElementById("coordinate-download-stats"),
 };
 
 const state = {
@@ -66,30 +66,15 @@ const state = {
     visibleClasses: new Set(legend.map((entry) => entry.name)),
 };
 
-function clearPredictionState() {
+function currentResolution() {
+    return Number(state.prediction?.resolution_m_per_px || 0) || 0;
+}
+
+function clearState() {
+    state.original = null;
     state.prediction = null;
     state.classMask = null;
     state.confidenceMap = null;
-}
-
-function currentResolution() {
-    return Number.parseFloat(elements.resolution.value || "0") || 0;
-}
-
-function currentOverlayAlpha() {
-    return Number.parseFloat(elements.overlayAlpha.value || "0.58") || 0.58;
-}
-
-function currentConfidenceThreshold() {
-    return Number.parseFloat(elements.confidenceThreshold.value || "0.6") || 0.6;
-}
-
-function pixelAreaSqKm() {
-    return currentResolution() > 0 ? (currentResolution() ** 2) / 1_000_000 : null;
-}
-
-function visibleClassIds() {
-    return classIdsFromSelection([...state.visibleClasses], legend);
 }
 
 function dataToBase64(value) {
@@ -100,49 +85,36 @@ function dataToBase64(value) {
     return separatorIndex >= 0 ? value.slice(separatorIndex + 1) : value;
 }
 
-function releaseOriginal() {
-    if (state.original?.src?.startsWith("blob:")) {
-        URL.revokeObjectURL(state.original.src);
-    }
+function visibleClassIds() {
+    return classIdsFromSelection([...state.visibleClasses], legend);
 }
 
 function runtimeCards() {
-    const payload = state.health || {};
     const processing = state.prediction?.processing || {};
     return [
-        { label: "API status", value: payload.ready ? "Ready" : payload.status || "Unknown" },
-        { label: "Model", value: payload.model_name || "EffKANSeg" },
-        { label: "Device", value: String(payload.device || "Unknown").toUpperCase() },
-        {
-            label: "Image size",
-            value: state.original ? `${state.original.width} x ${state.original.height}` : "Not loaded",
-        },
-        { label: "Processing", value: processing.mode || "Idle" },
-        { label: "Tiles", value: processing.tile_count || 0 },
+        { label: "API status", value: state.health?.ready ? "Ready" : state.health?.status || "Unknown" },
+        { label: "Service", value: state.prediction?.source_metadata?.provider || "NASA GIBS" },
+        { label: "Processing mode", value: processing.mode || "Idle" },
+        { label: "Tile count", value: processing.tile_count || 0 },
     ];
 }
 
-function sceneMetricPairs(rows) {
+function coordinateMetricPairs(rows) {
     if (!state.prediction) {
         return [];
     }
 
+    const metadata = state.prediction.source_metadata || {};
     const confidence = state.prediction.confidence_summary || {};
-    const processing = state.prediction.processing || {};
     const totalArea = rows.reduce((sum, row) => sum + (row.areaSqKm || 0), 0);
-    const metrics = [
+    return [
         { label: "Inference", value: `${state.prediction.inference_time} s` },
-        { label: "Mode", value: processing.mode || "-" },
-        { label: "Tiles", value: processing.tile_count || 0 },
         { label: "Dominant class", value: dominantClass(state.prediction.stats) },
         { label: "Mean confidence", value: Number(confidence.mean_confidence || 0).toFixed(3) },
-        {
-            label: "Scene area",
-            value: currentResolution() > 0 ? `${totalArea.toFixed(6)} km^2` : "Awaiting scale",
-        },
-        { label: "Low confidence", value: formatPercent(confidence.low_confidence_percentage || 0) },
+        { label: "Acquired", value: metadata.acquired_at ? metadata.acquired_at.slice(0, 10) : "-" },
+        { label: "Layer", value: metadata.imagery_layer || metadata.collection || "-" },
+        { label: "Scene area", value: currentResolution() > 0 ? `${totalArea.toFixed(6)} km^2` : "Awaiting scale" },
     ];
-    return metrics;
 }
 
 function buildStageViews() {
@@ -163,37 +135,38 @@ function buildStageViews() {
                   : originalSrc,
         overlay:
             state.classMask && state.original
-                ? renderOverlayDataUrl(state.original, state.classMask, legend, activeMaskIds, currentOverlayAlpha())
+                ? renderOverlayDataUrl(state.original, state.classMask, legend, activeMaskIds, 0.55)
                 : originalSrc,
         confidence: state.prediction?.heatmap_image ? dataUrlFromBase64(state.prediction.heatmap_image) : originalSrc,
         uncertainty:
             state.original && state.confidenceMap
-                ? renderUncertaintyDataUrl(state.original, state.confidenceMap, currentConfidenceThreshold())
+                ? renderUncertaintyDataUrl(state.original, state.confidenceMap, 0.6)
                 : originalSrc,
     };
 }
 
-function createSceneReportPayload(rows) {
-    const stageViews = buildStageViews();
+function createCoordinateReportPayload(rows) {
+    const views = buildStageViews();
+    const metadata = state.prediction?.source_metadata || {};
     return {
-        report_title: "SegImBud Scene Analysis Report",
-        mode_label: "Scene analysis",
-        summary_metrics: sceneMetricPairs(rows).slice(0, 4).map((metric) => ({
+        report_title: "SegImBud Coordinate Analysis Report",
+        mode_label: "Coordinate analysis",
+        summary_metrics: coordinateMetricPairs(rows).slice(0, 4).map((metric) => ({
             label: metric.label,
             value: metric.value,
         })),
         image_panels: [
             {
-                title: "Original scene",
+                title: "Fetched scene",
                 image_base64: dataToBase64(state.original?.canvas?.toDataURL("image/png") || ""),
             },
             {
                 title: "Operational overlay",
-                image_base64: dataToBase64(stageViews.overlay || ""),
+                image_base64: dataToBase64(views.overlay || ""),
             },
             {
                 title: "Confidence heatmap",
-                image_base64: dataToBase64(stageViews.confidence || ""),
+                image_base64: dataToBase64(views.confidence || ""),
             },
         ],
         insights: state.prediction?.operational_insights || [],
@@ -204,13 +177,10 @@ function createSceneReportPayload(rows) {
             area_sq_km: row.areaSqKm !== null ? row.areaSqKm.toFixed(6) : "-",
         })),
         extra_notes: [
-            `Active lens at export: ${state.activeView}.`,
-            `Visible classes: ${[...state.visibleClasses].join(", ") || "None"}.`,
-            `Low-confidence threshold: ${currentConfidenceThreshold().toFixed(2)}.`,
-            `Processing mode: ${state.prediction?.processing?.mode || "single"} with ${state.prediction?.processing?.tile_count || 1} tile(s).`,
-            currentResolution() > 0
-                ? `Resolution used for area estimates: ${currentResolution().toFixed(2)} m/px.`
-                : "Area estimates were not requested in this run.",
+            `Source provider: ${metadata.provider || "NASA GIBS"}.`,
+            `Satellite product: ${metadata.satellite || "Daily browse imagery"}.`,
+            metadata.imagery_layer ? `Imagery layer: ${metadata.imagery_layer}.` : "Imagery layer unavailable.",
+            metadata.item_url ? `Scene URL: ${metadata.item_url}.` : "Scene URL unavailable.",
         ],
     };
 }
@@ -228,11 +198,79 @@ function renderRuntime() {
         .join("");
 }
 
+function renderSourceMetadata() {
+    if (!state.prediction?.source_metadata) {
+        elements.sourceStack.innerHTML = `
+            <article class="runtime-card runtime-card--muted">
+                <div class="runtime-card__value">Fetched scene metadata will appear here after a coordinate run.</div>
+            </article>
+        `;
+        return;
+    }
+
+    const metadata = state.prediction.source_metadata;
+    const cards = [
+        { label: "Provider", value: metadata.provider || "-" },
+        { label: "Satellite", value: metadata.satellite || "-" },
+        { label: "Layer", value: metadata.imagery_layer || metadata.collection || "-" },
+        { label: "Acquired", value: metadata.acquired_at || "-" },
+        { label: "Requested scale", value: `${Number(metadata.resolution_m_per_px || 0).toFixed(2)} m/px` },
+        { label: "Native scale", value: `${Number(metadata.native_resolution_m_per_px || 0).toFixed(2)} m/px` },
+    ];
+
+    elements.sourceStack.innerHTML = cards
+        .map(
+            (card) => `
+                <article class="runtime-card">
+                    <div class="runtime-card__label">${card.label}</div>
+                    <div class="runtime-card__value">${card.value}</div>
+                </article>
+            `,
+        )
+        .join("");
+}
+
+function renderAreaSummary(rows) {
+    if (!state.prediction) {
+        elements.areaSummary.innerHTML = `
+            <article class="runtime-card runtime-card--muted">
+                <div class="runtime-card__value">Run a coordinate fetch to calculate coverage.</div>
+            </article>
+        `;
+        return;
+    }
+
+    const totalArea = rows.reduce((sum, row) => sum + (row.areaSqKm || 0), 0);
+    const dominantAreaRow = [...rows].sort((a, b) => (b.areaSqKm || 0) - (a.areaSqKm || 0))[0];
+    const metadata = state.prediction.source_metadata || {};
+
+    const cards = [
+        { label: "Scene area", value: `${totalArea.toFixed(6)} km^2` },
+        { label: "Requested width", value: `${Number(metadata.area_km || 0).toFixed(2)} km` },
+        {
+            label: "Largest class",
+            value: dominantAreaRow ? `${dominantAreaRow.class} | ${formatAreaKm2(dominantAreaRow.areaSqKm)}` : "-",
+        },
+        { label: "Render mode", value: metadata.render_strategy || "-" },
+    ];
+
+    elements.areaSummary.innerHTML = cards
+        .map(
+            (card) => `
+                <article class="runtime-card">
+                    <div class="runtime-card__label">${card.label}</div>
+                    <div class="runtime-card__value">${card.value}</div>
+                </article>
+            `,
+        )
+        .join("");
+}
+
 function renderInsights() {
     if (!state.prediction?.operational_insights?.length) {
         elements.insights.innerHTML = `
             <article class="insight-card">
-                <div class="insight-card__body">Model observations will appear here after a successful run.</div>
+                <div class="insight-card__body">Operational observations will appear here after a successful coordinate run.</div>
             </article>
         `;
         return;
@@ -244,54 +282,6 @@ function renderInsights() {
                 <article class="insight-card">
                     <div class="runtime-card__label">Insight ${index + 1}</div>
                     <div class="insight-card__body">${insight}</div>
-                </article>
-            `,
-        )
-        .join("");
-}
-
-function renderAreaSummary(rows) {
-    if (!state.prediction) {
-        elements.areaSummary.innerHTML = `
-            <article class="runtime-card runtime-card--muted">
-                <div class="runtime-card__value">Run the model to calculate area coverage.</div>
-            </article>
-        `;
-        return;
-    }
-
-    if (currentResolution() <= 0) {
-        elements.areaSummary.innerHTML = `
-            <article class="runtime-card runtime-card--muted">
-                <div class="runtime-card__label">Scale required</div>
-                <div class="runtime-card__value">Enter meters per pixel to calculate area.</div>
-            </article>
-        `;
-        return;
-    }
-
-    const totalArea = rows.reduce((sum, row) => sum + (row.areaSqKm || 0), 0);
-    const mappedArea = rows
-        .filter((row) => row.class !== "Background")
-        .reduce((sum, row) => sum + (row.areaSqKm || 0), 0);
-    const dominantAreaRow = [...rows].sort((a, b) => (b.areaSqKm || 0) - (a.areaSqKm || 0))[0];
-
-    const cards = [
-        { label: "Resolution", value: `${currentResolution().toFixed(2)} m/px` },
-        { label: "Scene area", value: `${totalArea.toFixed(6)} km^2` },
-        { label: "Mapped area", value: `${mappedArea.toFixed(6)} km^2` },
-        {
-            label: "Largest class",
-            value: dominantAreaRow ? `${dominantAreaRow.class} | ${formatAreaKm2(dominantAreaRow.areaSqKm)}` : "-",
-        },
-    ];
-
-    elements.areaSummary.innerHTML = cards
-        .map(
-            (card) => `
-                <article class="runtime-card">
-                    <div class="runtime-card__label">${card.label}</div>
-                    <div class="runtime-card__value">${card.value}</div>
                 </article>
             `,
         )
@@ -321,7 +311,7 @@ function renderLegend(rows) {
 function renderStats(rows) {
     if (!rows.length) {
         elements.statsGrid.innerHTML = `
-            <div class="empty-board">Run the model to populate per-class statistics for this scene.</div>
+            <div class="empty-board">Run a coordinate fetch to populate per-class statistics.</div>
         `;
         return;
     }
@@ -347,11 +337,7 @@ function renderStats(rows) {
 }
 
 function renderMetrics(rows) {
-    const metrics = sceneMetricPairs(rows);
-    if (!metrics.length) {
-        elements.metricsRibbon.innerHTML = "";
-        return;
-    }
+    const metrics = coordinateMetricPairs(rows);
     elements.metricsRibbon.innerHTML = metrics
         .map(
             (metric) => `
@@ -368,14 +354,6 @@ function setStageStatus(message) {
     elements.runStatus.textContent = message;
 }
 
-function setView(view) {
-    state.activeView = view;
-    elements.viewButtons.forEach((button) => {
-        button.classList.toggle("is-active", button.dataset.view === view);
-    });
-    renderStage();
-}
-
 function renderStage() {
     if (!state.original) {
         setImageTarget(elements.stageImage, "", elements.emptyState);
@@ -385,7 +363,7 @@ function renderStage() {
 
     const views = buildStageViews();
     const labels = {
-        original: "Original view",
+        original: "Fetched scene",
         mask: "Filtered class mask",
         overlay: "Operational overlay",
         confidence: "Confidence heatmap",
@@ -401,22 +379,38 @@ function renderStage() {
 
 function renderExports(rows) {
     const hasPrediction = Boolean(state.prediction);
+    elements.downloadReport.disabled = !hasPrediction;
+    elements.downloadSource.disabled = !hasPrediction || !state.prediction.original_image;
     elements.downloadMask.disabled = !hasPrediction;
     elements.downloadClassMask.disabled = !hasPrediction || !state.prediction.class_mask_image;
     elements.downloadHeatmap.disabled = !hasPrediction || !state.prediction.heatmap_image;
     elements.downloadStats.disabled = !hasPrediction;
-    elements.downloadReport.disabled = !hasPrediction;
 
     if (!hasPrediction) {
         return;
     }
 
-    elements.downloadMask.onclick = () => downloadBase64("segimbud-mask.png", state.prediction.mask_image);
-    elements.downloadClassMask.onclick = () => downloadBase64("segimbud-class-mask.png", state.prediction.class_mask_image);
-    elements.downloadHeatmap.onclick = () => downloadBase64("segimbud-heatmap.png", state.prediction.heatmap_image);
+    elements.downloadReport.onclick = async () => {
+        try {
+            setStageStatus("Building coordinate PDF report...");
+            const blob = await fetchBlob("/reports/pdf", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(createCoordinateReportPayload(rows)),
+            });
+            downloadBlob("segimbud-coordinate-report.pdf", blob, "application/pdf");
+            setStageStatus("Coordinate report downloaded.");
+        } catch (error) {
+            setStageStatus(error.message || "Report export failed.");
+        }
+    };
+    elements.downloadSource.onclick = () => downloadBase64("segimbud-coordinate-source.png", state.prediction.original_image);
+    elements.downloadMask.onclick = () => downloadBase64("segimbud-coordinate-mask.png", state.prediction.mask_image);
+    elements.downloadClassMask.onclick = () => downloadBase64("segimbud-coordinate-class-mask.png", state.prediction.class_mask_image);
+    elements.downloadHeatmap.onclick = () => downloadBase64("segimbud-coordinate-heatmap.png", state.prediction.heatmap_image);
     elements.downloadStats.onclick = () =>
         downloadBlob(
-            "segimbud-stats.csv",
+            "segimbud-coordinate-stats.csv",
             buildCsv(
                 rows.map((row) => ({
                     class: row.class,
@@ -428,25 +422,12 @@ function renderExports(rows) {
             ),
             "text/csv",
         );
-    elements.downloadReport.onclick = async () => {
-        try {
-            setStageStatus("Building PDF report...");
-            const blob = await fetchBlob("/reports/pdf", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(createSceneReportPayload(rows)),
-            });
-            downloadBlob("segimbud-scene-report.pdf", blob, "application/pdf");
-            setStageStatus("Scene report downloaded.");
-        } catch (error) {
-            setStageStatus(error.message || "Report export failed.");
-        }
-    };
 }
 
 function renderAll() {
     const rows = rowsFromStats(state.prediction?.stats || {}, currentResolution());
     renderRuntime();
+    renderSourceMetadata();
     renderAreaSummary(rows);
     renderInsights();
     renderLegend(rows);
@@ -474,70 +455,33 @@ function renderClassToggles() {
     });
 }
 
-async function prepareOriginal(file) {
-    releaseOriginal();
-    const sourceUrl = URL.createObjectURL(file);
-    state.original = {
-        src: sourceUrl,
-        ...(await imageDataFromSource(sourceUrl)),
-    };
-}
-
-async function handleFileSelection() {
-    const file = elements.file.files?.[0];
-    clearPredictionState();
-
-    if (!file) {
-        releaseOriginal();
-        state.original = null;
-        renderAll();
-        setStageStatus("Waiting for scene upload.");
-        return;
-    }
-
-    try {
-        await prepareOriginal(file);
-        renderAll();
-        setView("original");
-        setStageStatus(`Loaded ${file.name}. Ready to run inference.`);
-    } catch (error) {
-        releaseOriginal();
-        state.original = null;
-        renderAll();
-        setStageStatus(error.message || "The selected image could not be loaded.");
-    }
+async function prepareOriginal(base64) {
+    state.original = await imageDataFromBase64(base64);
+    state.original.src = dataUrlFromBase64(base64);
 }
 
 async function handleRun(event) {
     event.preventDefault();
-    const file = elements.file.files?.[0];
-    if (!file) {
-        setStageStatus("Choose a scene file before running the model.");
-        return;
-    }
-
-    clearPredictionState();
-    setStageStatus("Running scene analysis...");
+    clearState();
+    setStageStatus("Searching NASA GIBS and pulling the latest daily scene...");
     elements.runButton.disabled = true;
 
     try {
-        await prepareOriginal(file);
-        renderAll();
-        setView("original");
-        const formData = new FormData();
-        formData.append("file", file);
-        if (currentResolution() > 0) {
-            formData.append("resolution_m_per_px", String(currentResolution()));
-        }
-        formData.append("tile_size", String(Number.parseInt(elements.tileSize.value || "1024", 10)));
-        formData.append("tile_overlap", String(Number.parseInt(elements.tileOverlap.value || "160", 10)));
-        formData.append("force_tiled", elements.forceTiled.checked ? "true" : "false");
-        const payload = await fetchJson("/predict", {
+        const payload = await fetchJson("/coordinate-predict", {
             method: "POST",
-            body: formData,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                latitude: Number.parseFloat(elements.latitude.value || "0"),
+                longitude: Number.parseFloat(elements.longitude.value || "0"),
+                area_km: Number.parseFloat(elements.areaKm.value || "5"),
+                search_days: Number.parseInt(elements.searchDays.value || "21", 10),
+                max_cloud_cover: Number.parseFloat(elements.cloudCover.value || "20"),
+                output_size_px: 1024,
+            }),
         });
 
         state.prediction = payload;
+        await prepareOriginal(payload.original_image);
         if (payload.class_mask_image) {
             state.classMask = await grayscaleArrayFromBase64(payload.class_mask_image);
         }
@@ -547,30 +491,39 @@ async function handleRun(event) {
 
         renderAll();
         setView("overlay");
-        setStageStatus("Scene analysis complete.");
+        setStageStatus("Coordinate analysis complete.");
     } catch (error) {
+        clearState();
         renderAll();
-        setStageStatus(error.message || "The analysis request failed.");
+        setStageStatus(error.message || "The coordinate request failed.");
     } finally {
         elements.runButton.disabled = false;
     }
 }
 
-function resetScene() {
-    releaseOriginal();
-    state.original = null;
-    clearPredictionState();
+function resetWorkspace() {
+    clearState();
     state.activeView = "original";
     elements.form.reset();
-    elements.tileSize.value = "1024";
-    elements.tileOverlap.value = "160";
-    elements.forceTiled.checked = false;
+    elements.latitude.value = "23.8103";
+    elements.longitude.value = "90.4125";
+    elements.areaKm.value = "5.0";
+    elements.searchDays.value = "21";
+    elements.cloudCover.value = "20";
     [...elements.classToggles.querySelectorAll("input[type='checkbox']")].forEach((input) => {
         input.checked = true;
     });
     state.visibleClasses = new Set(legend.map((entry) => entry.name));
     renderAll();
-    setStageStatus("Scene workspace reset.");
+    setStageStatus("Coordinate workspace reset.");
+}
+
+function setView(view) {
+    state.activeView = view;
+    elements.viewButtons.forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.view === view);
+    });
+    renderStage();
 }
 
 async function init() {
@@ -578,11 +531,7 @@ async function init() {
     renderClassToggles();
     renderAll();
     elements.form.addEventListener("submit", handleRun);
-    elements.file.addEventListener("change", handleFileSelection);
-    elements.resetButton.addEventListener("click", resetScene);
-    elements.overlayAlpha.addEventListener("input", renderStage);
-    elements.confidenceThreshold.addEventListener("input", renderStage);
-    elements.resolution.addEventListener("input", renderAll);
+    elements.resetButton.addEventListener("click", resetWorkspace);
     elements.viewButtons.forEach((button) => {
         button.addEventListener("click", () => setView(button.dataset.view));
     });

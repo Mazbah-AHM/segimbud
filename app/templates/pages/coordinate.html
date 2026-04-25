@@ -1,0 +1,209 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<section class="workspace workspace--coordinate">
+    <aside class="panel console">
+        <div class="section-head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Coordinate Analysis</p>
+                <h1 class="section-title">Recent satellite pull</h1>
+                <p class="section-subtitle">Enter coordinates and pull recent free daily satellite imagery, then run segmentation and exports in one flow.</p>
+            </div>
+        </div>
+
+        <form id="coordinate-form" class="console__form">
+            <div class="field">
+                <label class="field__label" for="coordinate-latitude">Latitude</label>
+                <input type="number" id="coordinate-latitude" class="field__input" step="0.000001" value="23.8103">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="coordinate-longitude">Longitude</label>
+                <input type="number" id="coordinate-longitude" class="field__input" step="0.000001" value="90.4125">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="coordinate-area-km">Area width (km)</label>
+                <input type="number" id="coordinate-area-km" class="field__input" min="0.2" max="50" step="0.1" value="5.0">
+                <div class="field__help">The app crops a square area around the point and resamples it for segmentation.</div>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="coordinate-search-days">Search window (days)</label>
+                <input type="number" id="coordinate-search-days" class="field__input" min="1" max="180" step="1" value="21">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="coordinate-cloud-cover">Max cloud cover (%)</label>
+                <input type="number" id="coordinate-cloud-cover" class="field__input" min="0" max="100" step="1" value="20">
+                <div class="field__help">The current coordinate flow uses free NASA daily browse imagery, so this filter is kept for future higher-resolution providers and does not currently change the fetch result.</div>
+            </div>
+
+            <div class="field">
+                <div class="field__label-row">
+                    <label class="field__label">Visible classes</label>
+                    <button type="button" class="field__hint-button" id="coordinate-select-all">Select all</button>
+                </div>
+                <div id="coordinate-class-toggles" class="toggle-matrix"></div>
+            </div>
+
+            <div class="action-stack">
+                <button type="submit" class="primary-button" id="coordinate-run-button">Fetch and segment</button>
+                <button type="button" class="secondary-button" id="coordinate-reset-button">Reset workspace</button>
+            </div>
+        </form>
+
+        <section class="stack" aria-label="Coordinate runtime stack">
+            <div class="section-head" style="margin-top: 1rem; margin-bottom: 0.7rem;">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Runtime</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Acquisition status</h2>
+                </div>
+            </div>
+            <div id="coordinate-runtime-stack" class="runtime-stack"></div>
+        </section>
+    </aside>
+
+    <section class="panel stage">
+        <div class="section-head stage__head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Main stage</p>
+                <h2 class="section-title">Pulled scene lens</h2>
+                <p class="section-subtitle">Inspect the fetched scene, the segmentation mask, confidence heatmap, and the low-confidence focus view.</p>
+            </div>
+            <div id="coordinate-run-status" class="status-line">Waiting for coordinates.</div>
+        </div>
+
+        <div class="stage__toolbar">
+            <div id="coordinate-view-switcher" class="segmented-control" aria-label="Coordinate views">
+                <button type="button" class="is-active" data-view="original">Original</button>
+                <button type="button" data-view="mask">Mask</button>
+                <button type="button" data-view="overlay">Overlay</button>
+                <button type="button" data-view="confidence">Confidence</button>
+                <button type="button" data-view="uncertainty">Uncertainty</button>
+            </div>
+        </div>
+
+        <div class="stage__body">
+            <div class="viewport">
+                <img id="coordinate-stage-image" class="stage-image" alt="Coordinate analysis viewport">
+                <div id="coordinate-empty-state" class="viewport__empty">
+                    <div class="viewport__empty-title">No scene fetched</div>
+                    <div>Run a coordinate search to pull the latest scene.</div>
+                </div>
+            </div>
+
+            <aside class="rail-stack">
+                <div class="runtime-card">
+                    <div class="runtime-card__label">Active lens</div>
+                    <div id="coordinate-stage-label" class="runtime-card__value">Original view</div>
+                </div>
+
+                <div class="preview-stack">
+                    <article class="preview-card">
+                        <div class="preview-card__title">Original</div>
+                        <div class="preview-frame">
+                            <img id="coordinate-preview-original" class="preview-image" alt="Original satellite preview">
+                        </div>
+                    </article>
+                    <article class="preview-card">
+                        <div class="preview-card__title">Mask</div>
+                        <div class="preview-frame">
+                            <img id="coordinate-preview-mask" class="preview-image" alt="Coordinate mask preview">
+                        </div>
+                    </article>
+                    <article class="preview-card">
+                        <div class="preview-card__title">Confidence</div>
+                        <div class="preview-frame">
+                            <img id="coordinate-preview-confidence" class="preview-image" alt="Coordinate confidence preview">
+                        </div>
+                    </article>
+                </div>
+            </aside>
+        </div>
+
+        <div id="coordinate-metrics-ribbon" class="metrics-ribbon" aria-live="polite"></div>
+    </section>
+
+    <aside class="inspector">
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Scene metadata</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Acquisition source</h2>
+                </div>
+            </div>
+            <div id="coordinate-source-stack" class="runtime-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Coverage estimate</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Area summary</h2>
+                </div>
+            </div>
+            <div id="coordinate-area-summary" class="runtime-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Interpretation</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Operational insights</h2>
+                </div>
+            </div>
+            <div id="coordinate-insights" class="insight-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Exports</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Deliverables</h2>
+                </div>
+            </div>
+            <div class="export-grid">
+                <button type="button" class="primary-button" id="coordinate-download-report" disabled>Download PDF report</button>
+                <button type="button" class="export-button" id="coordinate-download-source" disabled>Download source PNG</button>
+                <button type="button" class="export-button" id="coordinate-download-mask" disabled>Download mask PNG</button>
+                <button type="button" class="export-button" id="coordinate-download-class-mask" disabled>Download class mask PNG</button>
+                <button type="button" class="export-button" id="coordinate-download-heatmap" disabled>Download heatmap PNG</button>
+                <button type="button" class="export-button" id="coordinate-download-stats" disabled>Download stats CSV</button>
+            </div>
+        </section>
+    </aside>
+
+    <section class="panel datawell">
+        <div class="section-head datawell__header">
+            <div class="section-head__copy">
+                <p class="eyebrow">Class intelligence</p>
+                <h2 class="section-title">Distribution and legend</h2>
+                <p class="section-subtitle">The same analytical board as scene mode, but driven from live coordinates instead of a manual upload.</p>
+            </div>
+        </div>
+
+        <div class="datawell__grid">
+            <div class="stack">
+                <div class="section-head">
+                    <div class="section-head__copy">
+                        <p class="eyebrow">Legend</p>
+                        <h3 class="section-title" style="font-size: 1rem;">Class palette</h3>
+                    </div>
+                </div>
+                <div id="coordinate-legend" class="legend-list"></div>
+            </div>
+
+            <div class="stack">
+                <div class="section-head">
+                    <div class="section-head__copy">
+                        <p class="eyebrow">Stats</p>
+                        <h3 class="section-title" style="font-size: 1rem;">Per-class coverage</h3>
+                    </div>
+                </div>
+                <div id="coordinate-stats-grid" class="stats-grid"></div>
+            </div>
+        </div>
+    </section>
+</section>
+{% endblock %}

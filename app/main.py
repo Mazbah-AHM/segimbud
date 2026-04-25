@@ -7,6 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -29,12 +30,11 @@ from .processor import (
     compute_confidence_summary,
     compute_stats,
     generate_operational_insights,
-    postprocess,
-    preprocess,
-    resize_prediction_maps,
+    run_segmentation,
 )
 from .reporting import build_pdf_report
-from .schemas import ReportRequest
+from .satellite import SatelliteFetchError, fetch_recent_scene_by_coordinates
+from .schemas import CoordinateAnalysisRequest, ReportRequest
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +51,14 @@ AUTO_DOWNLOAD_WEIGHTS = os.environ.get("SEGIMBUD_AUTO_DOWNLOAD_WEIGHTS", "true")
     "no",
 }
 DESTINATION = os.path.join(WEIGHTS_DIR, WEIGHTS_FILE)
-APP_VERSION = "segimbud-ui-2026-04-25-v3"
+APP_VERSION = "segimbud-ui-2026-04-25-v4"
 
 NAV_ITEMS = [
-    {"id": "scene", "label": "Scene Analysis", "href": "/scene"},
-    {"id": "change", "label": "Change Detection", "href": "/change"},
+    {"id": "scene", "label": "Scene", "href": "/scene"},
+    {"id": "coordinate", "label": "Coordinate", "href": "/coordinate"},
+    {"id": "batch", "label": "Batch", "href": "/batch"},
+    {"id": "review", "label": "Review", "href": "/review"},
+    {"id": "change", "label": "Change", "href": "/change"},
 ]
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -122,6 +125,12 @@ def encode_png(image_array: np.ndarray) -> str:
     return base64.b64encode(buffer.getvalue()).decode()
 
 
+def encode_pil_image(image: Image.Image) -> str:
+    buffer = BytesIO()
+    image.convert("RGB").save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
 def confidence_to_heatmap(conf_map: np.ndarray) -> np.ndarray:
     normalized = np.clip(conf_map, 0.0, 1.0)
     heatmap = cv2.applyColorMap((normalized * 255).astype(np.uint8), cv2.COLORMAP_MAGMA)
@@ -141,30 +150,36 @@ def build_health_payload() -> dict:
     }
 
 
-def build_prediction_payload(
-    image: Image.Image,
-    resolution_m_per_px: float | None = None,
-) -> dict:
+def _require_model() -> EffKANSeg:
     if model is None:
         raise HTTPException(
             status_code=503,
             detail=model_error or "The model is not ready yet. Check /api/health for startup details.",
         )
+    return model
 
-    original_width, original_height = image.size
-    input_tensor = preprocess(image).to(device)
 
+def predict_image(
+    image: Image.Image,
+    resolution_m_per_px: float | None = None,
+    *,
+    tile_size: int = 1024,
+    tile_overlap: int = 160,
+    force_tiled: bool = False,
+    include_original_image: bool = False,
+    source_metadata: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], np.ndarray, np.ndarray]:
+    network = _require_model()
     started_at = time.time()
-    with torch.inference_mode():
-        output = model(input_tensor)
-    inference_time = round(time.time() - started_at, 3)
-
-    _, class_mask, conf_map = postprocess(output)
-    class_mask, conf_map = resize_prediction_maps(
-        class_mask,
-        conf_map,
-        (original_width, original_height),
+    class_mask, conf_map, processing = run_segmentation(
+        image,
+        network,
+        device,
+        tile_size=tile_size,
+        tile_overlap=tile_overlap,
+        force_tiled=force_tiled,
     )
+    inference_time = round(time.time() - started_at, 3)
 
     color_mask = build_color_mask(class_mask)
     heatmap = confidence_to_heatmap(conf_map)
@@ -172,7 +187,7 @@ def build_prediction_payload(
     confidence_summary = compute_confidence_summary(conf_map)
     insights = generate_operational_insights(stats, confidence_summary)
 
-    return {
+    payload: dict[str, Any] = {
         "mask_image": encode_png(color_mask),
         "class_mask_image": encode_png(class_mask),
         "confidence_map_image": encode_png((np.clip(conf_map, 0.0, 1.0) * 255).astype(np.uint8)),
@@ -191,9 +206,17 @@ def build_prediction_payload(
         "inference_time": inference_time,
         "device": str(device),
         "resolution_m_per_px": resolution_m_per_px,
-        "input_size": [original_width, original_height],
-        "output_size": [original_width, original_height],
+        "input_size": [image.width, image.height],
+        "output_size": [image.width, image.height],
+        "processing": processing,
     }
+
+    if include_original_image:
+        payload["original_image"] = encode_pil_image(image)
+    if source_metadata is not None:
+        payload["source_metadata"] = source_metadata
+
+    return payload, class_mask, conf_map
 
 
 def decode_base64_image(image_base64: str) -> Image.Image:
@@ -251,7 +274,24 @@ def build_page_context(
                 for class_id, class_name in enumerate(CLASS_NAMES)
             ],
             "classes": CLASS_NAMES,
+            "appVersion": APP_VERSION,
         },
+    }
+
+
+def build_batch_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    successful = [item for item in results if item.get("ok")]
+    total_inference_time = round(
+        sum(float(item["prediction"]["inference_time"]) for item in successful),
+        3,
+    )
+    total_tiles = sum(int(item["prediction"]["processing"]["tile_count"]) for item in successful)
+    return {
+        "requested_count": len(results),
+        "successful_count": len(successful),
+        "failed_count": len(results) - len(successful),
+        "total_inference_time": total_inference_time,
+        "total_tile_count": total_tiles,
     }
 
 
@@ -301,6 +341,45 @@ def scene_page(request: Request):
     return templates.TemplateResponse("pages/scene.html", context)
 
 
+@app.get("/coordinate", response_class=HTMLResponse, include_in_schema=False)
+def coordinate_page(request: Request):
+    context = build_page_context(
+        request,
+        active_page="coordinate",
+        page_title="Coordinate Analysis",
+        page_description="Fetch recent satellite imagery by coordinates and run segmentation",
+        page_styles=["css/pages/coordinate.css"],
+        page_scripts=["js/pages/coordinate.js"],
+    )
+    return templates.TemplateResponse("pages/coordinate.html", context)
+
+
+@app.get("/batch", response_class=HTMLResponse, include_in_schema=False)
+def batch_page(request: Request):
+    context = build_page_context(
+        request,
+        active_page="batch",
+        page_title="Batch Processing",
+        page_description="Process multiple scenes with tiled inference",
+        page_styles=["css/pages/batch.css"],
+        page_scripts=["js/pages/batch.js"],
+    )
+    return templates.TemplateResponse("pages/batch.html", context)
+
+
+@app.get("/review", response_class=HTMLResponse, include_in_schema=False)
+def review_page(request: Request):
+    context = build_page_context(
+        request,
+        active_page="review",
+        page_title="Review and QA",
+        page_description="Manual review, correction, and QA export workspace",
+        page_styles=["css/pages/review.css"],
+        page_scripts=["js/pages/review.js"],
+    )
+    return templates.TemplateResponse("pages/review.html", context)
+
+
 @app.get("/change", response_class=HTMLResponse, include_in_schema=False)
 def change_page(request: Request):
     context = build_page_context(
@@ -341,9 +420,89 @@ def favicon():
 async def predict(
     file: UploadFile = File(...),
     resolution_m_per_px: float | None = Form(default=None),
+    tile_size: int = Form(default=1024),
+    tile_overlap: int = Form(default=160),
+    force_tiled: bool = Form(default=False),
 ):
     image = parse_uploaded_image(file)
-    return build_prediction_payload(image, resolution_m_per_px)
+    payload, _, _ = predict_image(
+        image,
+        resolution_m_per_px,
+        tile_size=tile_size,
+        tile_overlap=tile_overlap,
+        force_tiled=force_tiled,
+    )
+    return payload
+
+
+@app.post("/api/coordinate-predict")
+async def coordinate_predict(request_body: CoordinateAnalysisRequest):
+    try:
+        image, source_metadata = fetch_recent_scene_by_coordinates(
+            request_body.latitude,
+            request_body.longitude,
+            area_km=request_body.area_km,
+            search_days=request_body.search_days,
+            max_cloud_cover=request_body.max_cloud_cover,
+            output_size_px=request_body.output_size_px,
+        )
+    except SatelliteFetchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    payload, _, _ = predict_image(
+        image,
+        resolution_m_per_px=source_metadata["resolution_m_per_px"],
+        include_original_image=True,
+        source_metadata=source_metadata,
+    )
+    return payload
+
+
+@app.post("/api/batch-predict")
+async def batch_predict(
+    files: list[UploadFile] = File(...),
+    resolution_m_per_px: float | None = Form(default=None),
+    tile_size: int = Form(default=1024),
+    tile_overlap: int = Form(default=160),
+    force_tiled: bool = Form(default=True),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one image is required for batch processing.")
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="Batch processing currently supports up to 10 images at a time.")
+
+    results: list[dict[str, Any]] = []
+    for upload in files:
+        try:
+            image = parse_uploaded_image(upload)
+            payload, _, _ = predict_image(
+                image,
+                resolution_m_per_px=resolution_m_per_px,
+                tile_size=tile_size,
+                tile_overlap=tile_overlap,
+                force_tiled=force_tiled,
+            )
+            results.append(
+                {
+                    "ok": True,
+                    "filename": upload.filename or "scene",
+                    "prediction": payload,
+                }
+            )
+        except Exception as exc:
+            logger.exception("Batch prediction failed for %s", upload.filename)
+            results.append(
+                {
+                    "ok": False,
+                    "filename": upload.filename or "scene",
+                    "error": str(exc),
+                }
+            )
+
+    return {
+        "results": results,
+        "summary": build_batch_summary(results),
+    }
 
 
 @app.post("/api/change-detection")
@@ -351,25 +510,33 @@ async def change_detection(
     before_file: UploadFile = File(...),
     after_file: UploadFile = File(...),
     resolution_m_per_px: float | None = Form(default=None),
+    tile_size: int = Form(default=1024),
+    tile_overlap: int = Form(default=160),
+    force_tiled: bool = Form(default=False),
 ):
     before_image = parse_uploaded_image(before_file)
     after_image = parse_uploaded_image(after_file)
 
-    before_payload = build_prediction_payload(before_image, resolution_m_per_px)
-    after_payload = build_prediction_payload(after_image, resolution_m_per_px)
-
-    before_mask = np.array(Image.open(BytesIO(base64.b64decode(before_payload["class_mask_image"]))).convert("L"))
-    after_mask = np.array(Image.open(BytesIO(base64.b64decode(after_payload["class_mask_image"]))).convert("L"))
+    before_payload, before_mask, _ = predict_image(
+        before_image,
+        resolution_m_per_px,
+        tile_size=tile_size,
+        tile_overlap=tile_overlap,
+        force_tiled=force_tiled,
+    )
+    after_payload, after_mask, after_conf_map = predict_image(
+        after_image,
+        resolution_m_per_px,
+        tile_size=tile_size,
+        tile_overlap=tile_overlap,
+        force_tiled=force_tiled,
+    )
 
     change_summary = compute_change_analysis(
         before_mask,
         after_mask,
         resolution_m_per_px=resolution_m_per_px,
     )
-    after_conf_map = np.array(
-        Image.open(BytesIO(base64.b64decode(after_payload["confidence_map_image"]))).convert("L"),
-        dtype=np.float32,
-    ) / 255.0
     change_insights = generate_operational_insights(
         after_payload["stats"],
         compute_confidence_summary(after_conf_map),
@@ -394,4 +561,3 @@ async def change_detection(
 @app.post("/api/reports/pdf")
 async def create_pdf_report(report_request: ReportRequest):
     return build_report_response(report_request)
-

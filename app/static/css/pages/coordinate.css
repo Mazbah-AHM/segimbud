@@ -1,0 +1,83 @@
+.workspace--coordinate {
+    grid-template-columns: 320px minmax(0, 1fr) 320px;
+    grid-template-areas:
+        "console stage inspector"
+        "datawell datawell inspector";
+}
+
+.workspace--coordinate .console {
+    grid-area: console;
+    position: sticky;
+    top: calc(var(--topbar-height) + 0.9rem);
+    max-height: calc(100vh - var(--topbar-height) - 1.4rem);
+    overflow: auto;
+    scrollbar-gutter: stable;
+}
+
+.workspace--coordinate .stage {
+    grid-area: stage;
+}
+
+.workspace--coordinate .inspector {
+    grid-area: inspector;
+    display: grid;
+    gap: 0.95rem;
+    position: sticky;
+    top: calc(var(--topbar-height) + 0.9rem);
+    max-height: calc(100vh - var(--topbar-height) - 1.4rem);
+    overflow: auto;
+    scrollbar-gutter: stable;
+}
+
+.workspace--coordinate .datawell {
+    grid-area: datawell;
+}
+
+.workspace--coordinate .stage__body {
+    grid-template-columns: minmax(0, 1fr) 220px;
+}
+
+.workspace--coordinate .datawell__grid {
+    grid-template-columns: 290px minmax(0, 1fr);
+}
+
+@media (max-width: 1360px) {
+    .workspace--coordinate {
+        grid-template-columns: 300px minmax(0, 1fr);
+        grid-template-areas:
+            "console stage"
+            "inspector inspector"
+            "datawell datawell";
+    }
+
+    .workspace--coordinate .inspector {
+        position: static;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        max-height: none;
+        overflow: visible;
+    }
+}
+
+@media (max-width: 1040px) {
+    .workspace--coordinate {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "console"
+            "stage"
+            "inspector"
+            "datawell";
+    }
+
+    .workspace--coordinate .console,
+    .workspace--coordinate .inspector {
+        position: static;
+        max-height: none;
+        overflow: visible;
+    }
+
+    .workspace--coordinate .stage__body,
+    .workspace--coordinate .datawell__grid,
+    .workspace--coordinate .inspector {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,78 @@
+.workspace--review {
+    grid-template-columns: 320px minmax(0, 1fr) 320px;
+    grid-template-areas:
+        "console stage inspector"
+        "datawell datawell inspector";
+}
+
+.workspace--review .console {
+    grid-area: console;
+    position: sticky;
+    top: calc(var(--topbar-height) + 0.9rem);
+    max-height: calc(100vh - var(--topbar-height) - 1.4rem);
+    overflow: auto;
+    scrollbar-gutter: stable;
+}
+
+.workspace--review .stage {
+    grid-area: stage;
+}
+
+.workspace--review .inspector {
+    grid-area: inspector;
+    display: grid;
+    gap: 0.95rem;
+    position: sticky;
+    top: calc(var(--topbar-height) + 0.9rem);
+    max-height: calc(100vh - var(--topbar-height) - 1.4rem);
+    overflow: auto;
+    scrollbar-gutter: stable;
+}
+
+.workspace--review .datawell {
+    grid-area: datawell;
+}
+
+.workspace--review .datawell__grid {
+    grid-template-columns: 290px minmax(0, 1fr);
+}
+
+@media (max-width: 1360px) {
+    .workspace--review {
+        grid-template-columns: 300px minmax(0, 1fr);
+        grid-template-areas:
+            "console stage"
+            "inspector inspector"
+            "datawell datawell";
+    }
+
+    .workspace--review .inspector {
+        position: static;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        max-height: none;
+        overflow: visible;
+    }
+}
+
+@media (max-width: 1040px) {
+    .workspace--review {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "console"
+            "stage"
+            "inspector"
+            "datawell";
+    }
+
+    .workspace--review .console,
+    .workspace--review .inspector {
+        position: static;
+        max-height: none;
+        overflow: visible;
+    }
+
+    .workspace--review .datawell__grid,
+    .workspace--review .inspector {
+        grid-template-columns: 1fr;
+    }
+}

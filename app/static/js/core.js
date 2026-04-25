@@ -148,6 +148,35 @@ export function rowsFromStats(stats, resolutionMetersPerPixel = 0) {
     return rows;
 }
 
+export function rowsFromMask(mask, legendEntries, resolutionMetersPerPixel = 0) {
+    if (!mask) {
+        return [];
+    }
+
+    const totalPixels = mask.width * mask.height;
+    const pixelAreaSqKm = resolutionMetersPerPixel > 0 ? (resolutionMetersPerPixel ** 2) / 1_000_000 : null;
+    const counts = new Map();
+    for (let index = 0; index < mask.data.length; index += 1) {
+        const classId = Number(mask.data[index]);
+        counts.set(classId, (counts.get(classId) || 0) + 1);
+    }
+
+    const rows = (legendEntries || []).map((entry) => {
+        const pixels = counts.get(Number(entry.class_id)) || 0;
+        return {
+            class: entry.name,
+            classId: Number(entry.class_id),
+            pixels,
+            percentage: totalPixels ? (pixels / totalPixels) * 100 : 0,
+            color: entry.color || [255, 255, 255],
+            areaSqKm: pixelAreaSqKm !== null ? pixels * pixelAreaSqKm : null,
+        };
+    });
+
+    rows.sort((a, b) => b.pixels - a.pixels);
+    return rows;
+}
+
 export function buildLegendMap(legendEntries) {
     return new Map((legendEntries || []).map((entry) => [Number(entry.class_id), entry]));
 }

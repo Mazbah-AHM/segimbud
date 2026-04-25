@@ -1,0 +1,171 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<section class="workspace workspace--review">
+    <aside class="panel console">
+        <div class="section-head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Review and QA</p>
+                <h1 class="section-title">Manual correction workspace</h1>
+                <p class="section-subtitle">Run a prediction, paint corrections directly on the class mask, and export reviewed deliverables.</p>
+            </div>
+        </div>
+
+        <form id="review-form" class="console__form" novalidate>
+            <div class="field">
+                <label class="field__label" for="review-file">Source image</label>
+                <input type="file" id="review-file" class="field__input" accept=".png,.jpg,.jpeg,.tif,.tiff" required>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="review-resolution">Resolution (m/px)</label>
+                <input type="number" id="review-resolution" class="field__input" min="0" step="0.1" value="0.5">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="review-status-select">Review status</label>
+                <select id="review-status-select" class="field__input">
+                    <option value="pending">Pending review</option>
+                    <option value="approved">Approved</option>
+                    <option value="needs-rework">Needs rework</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="reviewer-name">Reviewer</label>
+                <input type="text" id="reviewer-name" class="field__input" placeholder="Reviewer name">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="review-brush-class">Brush class</label>
+                <select id="review-brush-class" class="field__input"></select>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="review-brush-size">Brush size (px)</label>
+                <input type="range" id="review-brush-size" class="field__input" min="4" max="96" step="2" value="18">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="review-zoom">Canvas zoom</label>
+                <input type="range" id="review-zoom" class="field__input" min="0.5" max="4" step="0.1" value="1">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="review-confidence-threshold">Low-confidence threshold</label>
+                <input type="range" id="review-confidence-threshold" class="field__input" min="0.1" max="0.95" step="0.01" value="0.6">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="review-notes">Review notes</label>
+                <textarea id="review-notes" class="field__input field__textarea" placeholder="Record review notes, approval rationale, or issues to revisit."></textarea>
+            </div>
+
+            <div class="action-stack">
+                <button type="button" class="primary-button" id="review-run-button">Run and review</button>
+                <button type="button" class="secondary-button" id="review-reset-button">Reset workspace</button>
+            </div>
+        </form>
+    </aside>
+
+    <section class="panel stage">
+        <div class="section-head stage__head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Review canvas</p>
+                <h2 class="section-title">Correction board</h2>
+                <p class="section-subtitle">Paint directly on the predicted class mask. The canvas stays scrollable so you can zoom in and edit without losing context.</p>
+            </div>
+            <div id="review-run-status" class="status-line">Waiting for review image.</div>
+        </div>
+
+        <div class="stage__toolbar">
+            <div id="review-view-switcher" class="segmented-control" aria-label="Review views">
+                <button type="button" class="is-active" data-view="overlay">Overlay</button>
+                <button type="button" data-view="mask">Mask</button>
+                <button type="button" data-view="confidence">Confidence</button>
+                <button type="button" data-view="uncertainty">Uncertainty</button>
+                <button type="button" data-view="original">Original</button>
+            </div>
+        </div>
+
+        <div class="canvas-shell">
+            <canvas id="review-stage-canvas" class="stage-canvas"></canvas>
+            <div id="review-empty-state" class="viewport__empty" style="padding: 2rem;">
+                <div class="viewport__empty-title">No review loaded</div>
+                <div>Run a review job to open the editable canvas.</div>
+            </div>
+        </div>
+
+        <div id="review-metrics-ribbon" class="metrics-ribbon" aria-live="polite"></div>
+    </section>
+
+    <aside class="inspector">
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">QA summary</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Review status</h2>
+                </div>
+            </div>
+            <div id="review-qa-summary" class="runtime-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Touched classes</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Edited labels</h2>
+                </div>
+            </div>
+            <div id="review-touched-classes" class="pill-row"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Exports</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Deliverables</h2>
+                </div>
+            </div>
+            <div class="export-grid">
+                <button type="button" class="primary-button" id="review-download-report" disabled>Download QA PDF</button>
+                <button type="button" class="export-button" id="review-download-mask" disabled>Download corrected mask PNG</button>
+                <button type="button" class="export-button" id="review-download-stats" disabled>Download corrected stats CSV</button>
+                <button type="button" class="export-button" id="review-download-qa" disabled>Download QA JSON</button>
+            </div>
+        </section>
+    </aside>
+
+    <section class="panel datawell">
+        <div class="section-head datawell__header">
+            <div class="section-head__copy">
+                <p class="eyebrow">Reviewed coverage</p>
+                <h2 class="section-title">Corrected stats and legend</h2>
+                <p class="section-subtitle">The stats below update live as corrections are painted onto the mask.</p>
+            </div>
+        </div>
+
+        <div class="datawell__grid">
+            <div class="stack">
+                <div class="section-head">
+                    <div class="section-head__copy">
+                        <p class="eyebrow">Legend</p>
+                        <h3 class="section-title" style="font-size: 1rem;">Class palette</h3>
+                    </div>
+                </div>
+                <div id="review-legend" class="legend-list"></div>
+            </div>
+
+            <div class="stack">
+                <div class="section-head">
+                    <div class="section-head__copy">
+                        <p class="eyebrow">Stats</p>
+                        <h3 class="section-title" style="font-size: 1rem;">Corrected per-class coverage</h3>
+                    </div>
+                </div>
+                <div id="review-stats-grid" class="stats-grid"></div>
+            </div>
+        </div>
+    </section>
+</section>
+{% endblock %}

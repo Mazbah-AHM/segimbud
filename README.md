@@ -2,7 +2,7 @@
 
 SegImBud is a web app for satellite image segmentation and change analysis.
 
-Users can upload one image for segmentation or two images for change detection, then review masks, confidence views, class statistics, area estimates, and downloadable reports.
+Users can upload one image for segmentation, compare two scenes for change detection, fetch recent imagery from coordinates, process multiple images in batch, and review or correct masks before exporting reports.
 
 ## Run The App
 
@@ -21,6 +21,9 @@ python run.py
 3. Open:
 
 - `http://127.0.0.1:8000/scene`
+- `http://127.0.0.1:8000/coordinate`
+- `http://127.0.0.1:8000/batch`
+- `http://127.0.0.1:8000/review`
 - `http://127.0.0.1:8000/change`
 - `http://127.0.0.1:8000/docs`
 
@@ -33,7 +36,11 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ## What It Can Do
 
 - Segment a single satellite image
+- Fetch recent daily satellite imagery from coordinates
 - Show original, mask, overlay, confidence, and uncertainty views
+- Run tiled inference for large scenes
+- Process multiple scenes in one batch
+- Review and manually correct predicted masks
 - Calculate per-class pixel counts and percentages
 - Estimate area when resolution is provided
 - Compare two scenes and detect land-cover changes
@@ -42,6 +49,9 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ## Main Routes
 
 - `/scene` for single-image analysis
+- `/coordinate` for coordinate-based imagery fetch and segmentation
+- `/batch` for multi-image processing
+- `/review` for QA and manual mask correction
 - `/change` for change detection
 - `/docs` for API docs
 - `/` redirects to `/scene`
@@ -88,6 +98,8 @@ SEGIMBUD_AUTO_DOWNLOAD_WEIGHTS=false
 
 - `GET /api/health`
 - `POST /api/predict`
+- `POST /api/coordinate-predict`
+- `POST /api/batch-predict`
 - `POST /api/change-detection`
 - `POST /api/reports/pdf`
 
@@ -95,3 +107,4 @@ SEGIMBUD_AUTO_DOWNLOAD_WEIGHTS=false
 
 - The app runs on CUDA when available, otherwise CPU.
 - The main app lives on port `8000`.
+- Coordinate fetch uses NASA GIBS daily imagery and needs an active internet connection.

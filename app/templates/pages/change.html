@@ -30,6 +30,24 @@
             </div>
 
             <div class="field">
+                <label class="field__label" for="change-tile-size">Tile size (px)</label>
+                <input type="number" id="change-tile-size" class="field__input" min="256" max="2048" step="128" value="1024">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="change-tile-overlap">Tile overlap (px)</label>
+                <input type="number" id="change-tile-overlap" class="field__input" min="0" max="512" step="16" value="160">
+                <div class="field__help">Use tiled mode for large baselines and comparisons so change detection stays stable across the whole frame.</div>
+            </div>
+
+            <div class="field">
+                <div class="field__label-row">
+                    <label class="field__label" for="change-force-tiled">Always use tiled mode</label>
+                    <input type="checkbox" id="change-force-tiled" class="field__input">
+                </div>
+            </div>
+
+            <div class="field">
                 <label class="field__label" for="change-overlay-alpha">Overlay opacity</label>
                 <input type="range" id="change-overlay-alpha" class="field__input" min="0.1" max="0.9" step="0.01" value="0.58">
             </div>

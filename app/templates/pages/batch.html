@@ -1,0 +1,187 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<section class="workspace workspace--batch">
+    <aside class="panel console">
+        <div class="section-head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Batch Processing</p>
+                <h1 class="section-title">Tiled multi-scene runs</h1>
+                <p class="section-subtitle">Process multiple scenes in one pass with tiled inference, then inspect each result without leaving the workbench.</p>
+            </div>
+        </div>
+
+        <form id="batch-form" class="console__form">
+            <div class="field">
+                <label class="field__label" for="batch-files">Input scenes</label>
+                <input type="file" id="batch-files" class="field__input" accept=".png,.jpg,.jpeg,.tif,.tiff" multiple required>
+                <div class="field__help">Up to 10 scenes at a time. Large scenes are handled with tiled inference automatically.</div>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="batch-resolution">Resolution (m/px)</label>
+                <input type="number" id="batch-resolution" class="field__input" min="0" step="0.1" value="0.5">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="batch-tile-size">Tile size (px)</label>
+                <input type="number" id="batch-tile-size" class="field__input" min="256" max="2048" step="128" value="1024">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="batch-tile-overlap">Tile overlap (px)</label>
+                <input type="number" id="batch-tile-overlap" class="field__input" min="0" max="512" step="16" value="160">
+            </div>
+
+            <div class="field">
+                <div class="field__label-row">
+                    <label class="field__label" for="batch-force-tiled">Always use tiled mode</label>
+                    <input type="checkbox" id="batch-force-tiled" class="field__input" checked>
+                </div>
+            </div>
+
+            <div class="field">
+                <div class="field__label-row">
+                    <label class="field__label">Visible classes</label>
+                    <button type="button" class="field__hint-button" id="batch-select-all">Select all</button>
+                </div>
+                <div id="batch-class-toggles" class="toggle-matrix"></div>
+            </div>
+
+            <div class="action-stack">
+                <button type="submit" class="primary-button" id="batch-run-button">Run batch job</button>
+                <button type="button" class="secondary-button" id="batch-reset-button">Reset workspace</button>
+            </div>
+        </form>
+    </aside>
+
+    <section class="panel stage">
+        <div class="section-head stage__head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Main stage</p>
+                <h2 class="section-title">Selected result</h2>
+                <p class="section-subtitle">Each completed scene stays available for review. Pick one from the queue below to inspect it in detail.</p>
+            </div>
+            <div id="batch-run-status" class="status-line">Waiting for batch job.</div>
+        </div>
+
+        <div class="stage__toolbar">
+            <div id="batch-view-switcher" class="segmented-control" aria-label="Batch views">
+                <button type="button" class="is-active" data-view="original">Original</button>
+                <button type="button" data-view="mask">Mask</button>
+                <button type="button" data-view="overlay">Overlay</button>
+                <button type="button" data-view="confidence">Confidence</button>
+            </div>
+        </div>
+
+        <div class="stage__body">
+            <div class="viewport">
+                <img id="batch-stage-image" class="stage-image" alt="Batch stage viewport">
+                <div id="batch-empty-state" class="viewport__empty">
+                    <div class="viewport__empty-title">No batch result selected</div>
+                    <div>Run a batch job, then pick one completed result from the queue.</div>
+                </div>
+            </div>
+
+            <aside class="rail-stack">
+                <div class="runtime-card">
+                    <div class="runtime-card__label">Selected file</div>
+                    <div id="batch-stage-label" class="runtime-card__value">None</div>
+                </div>
+
+                <div class="preview-stack">
+                    <article class="preview-card">
+                        <div class="preview-card__title">Original</div>
+                        <div class="preview-frame">
+                            <img id="batch-preview-original" class="preview-image" alt="Selected original preview">
+                        </div>
+                    </article>
+                    <article class="preview-card">
+                        <div class="preview-card__title">Mask</div>
+                        <div class="preview-frame">
+                            <img id="batch-preview-mask" class="preview-image" alt="Selected mask preview">
+                        </div>
+                    </article>
+                    <article class="preview-card">
+                        <div class="preview-card__title">Confidence</div>
+                        <div class="preview-frame">
+                            <img id="batch-preview-confidence" class="preview-image" alt="Selected confidence preview">
+                        </div>
+                    </article>
+                </div>
+            </aside>
+        </div>
+
+        <div id="batch-metrics-ribbon" class="metrics-ribbon" aria-live="polite"></div>
+    </section>
+
+    <aside class="inspector">
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Batch summary</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Run status</h2>
+                </div>
+            </div>
+            <div id="batch-summary-stack" class="runtime-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Selected result</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Processing details</h2>
+                </div>
+            </div>
+            <div id="batch-processing-stack" class="runtime-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Exports</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Deliverables</h2>
+                </div>
+            </div>
+            <div class="export-grid">
+                <button type="button" class="primary-button" id="batch-download-report" disabled>Download selected PDF</button>
+                <button type="button" class="export-button" id="batch-download-mask" disabled>Download selected mask PNG</button>
+                <button type="button" class="export-button" id="batch-download-stats" disabled>Download selected stats CSV</button>
+                <button type="button" class="export-button" id="batch-download-summary" disabled>Download batch summary CSV</button>
+            </div>
+        </section>
+    </aside>
+
+    <section class="panel datawell">
+        <div class="section-head datawell__header">
+            <div class="section-head__copy">
+                <p class="eyebrow">Batch queue</p>
+                <h2 class="section-title">Completed results</h2>
+                <p class="section-subtitle">Every file keeps its own result state, processing metadata, and error status.</p>
+            </div>
+        </div>
+
+        <div class="datawell__grid">
+            <div class="stack">
+                <div class="section-head">
+                    <div class="section-head__copy">
+                        <p class="eyebrow">Queue</p>
+                        <h3 class="section-title" style="font-size: 1rem;">Processed files</h3>
+                    </div>
+                </div>
+                <div id="batch-results-list" class="queue-list"></div>
+            </div>
+
+            <div class="stack">
+                <div class="section-head">
+                    <div class="section-head__copy">
+                        <p class="eyebrow">Stats</p>
+                        <h3 class="section-title" style="font-size: 1rem;">Selected per-class coverage</h3>
+                    </div>
+                </div>
+                <div id="batch-stats-grid" class="stats-grid"></div>
+            </div>
+        </div>
+    </section>
+</section>
+{% endblock %}

@@ -23,6 +23,9 @@ const elements = {
     beforeFile: document.getElementById("change-before-file"),
     afterFile: document.getElementById("change-after-file"),
     resolution: document.getElementById("change-resolution"),
+    tileSize: document.getElementById("change-tile-size"),
+    tileOverlap: document.getElementById("change-tile-overlap"),
+    forceTiled: document.getElementById("change-force-tiled"),
     overlayAlpha: document.getElementById("change-overlay-alpha"),
     classToggles: document.getElementById("change-class-toggles"),
     selectAll: document.getElementById("change-select-all"),
@@ -111,6 +114,8 @@ function changeMetricPairs() {
     const summary = state.payload.change_summary || {};
     const transitions = summary.transitions || [];
     const pixelArea = pixelAreaSqKm();
+    const beforeProcessing = state.payload.before?.processing || {};
+    const afterProcessing = state.payload.after?.processing || {};
     const topTransition = transitions.length
         ? `${transitions[0].from_class} -> ${transitions[0].to_class}`
         : "No change";
@@ -118,14 +123,8 @@ function changeMetricPairs() {
         { label: "Changed pixels", value: Number(summary.changed_pixels || 0).toLocaleString() },
         { label: "Changed share", value: formatPercent(summary.changed_percentage || 0) },
         { label: "Top transition", value: topTransition },
-        {
-            label: "After confidence",
-            value: Number(state.payload.after.confidence_summary?.mean_confidence || 0).toFixed(3),
-        },
-        {
-            label: "Resolution",
-            value: currentResolution() > 0 ? `${currentResolution().toFixed(2)} m/px` : "Set resolution",
-        },
+        { label: "Before tiles", value: beforeProcessing.tile_count || 0 },
+        { label: "After tiles", value: afterProcessing.tile_count || 0 },
         {
             label: "Changed area",
             value:
@@ -233,6 +232,8 @@ function createChangeReportPayload() {
         extra_notes: [
             `Active lens at export: ${state.activeView}.`,
             `Visible classes: ${[...state.visibleClasses].join(", ") || "None"}.`,
+            `Before processing: ${state.payload?.before?.processing?.mode || "single"} with ${state.payload?.before?.processing?.tile_count || 1} tile(s).`,
+            `After processing: ${state.payload?.after?.processing?.mode || "single"} with ${state.payload?.after?.processing?.tile_count || 1} tile(s).`,
             currentResolution() > 0
                 ? `Resolution used for area estimates: ${currentResolution().toFixed(2)} m/px.`
                 : "Area estimates were not requested in this run.",
@@ -576,6 +577,9 @@ async function handleRun(event) {
         if (currentResolution() > 0) {
             formData.append("resolution_m_per_px", String(currentResolution()));
         }
+        formData.append("tile_size", String(Number.parseInt(elements.tileSize.value || "1024", 10)));
+        formData.append("tile_overlap", String(Number.parseInt(elements.tileOverlap.value || "160", 10)));
+        formData.append("force_tiled", elements.forceTiled.checked ? "true" : "false");
         state.payload = await fetchJson("/change-detection", {
             method: "POST",
             body: formData,
@@ -604,6 +608,9 @@ function resetWorkspace() {
     clearChangeState();
     state.activeView = "change";
     elements.form.reset();
+    elements.tileSize.value = "1024";
+    elements.tileOverlap.value = "160";
+    elements.forceTiled.checked = false;
     [...elements.classToggles.querySelectorAll("input[type='checkbox']")].forEach((input) => {
         input.checked = true;
     });

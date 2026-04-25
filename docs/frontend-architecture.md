@@ -7,6 +7,9 @@ This keeps the UI easier to maintain and keeps Python focused on the backend log
 ## Pages
 
 - `scene.html` for single-image analysis
+- `coordinate.html` for coordinate-based imagery fetch
+- `batch.html` for multi-scene processing
+- `review.html` for QA and manual correction
 - `change.html` for two-image comparison
 
 ## Frontend Files
@@ -20,6 +23,9 @@ This keeps the UI easier to maintain and keeps Python focused on the backend log
 
 - `/` redirects to `/scene`
 - `/scene` is the main analysis page
+- `/coordinate` handles coordinate-driven imagery analysis
+- `/batch` handles batch processing
+- `/review` handles QA and correction work
 - `/change` is the change-detection page
 - `/api/*` contains backend endpoints
 

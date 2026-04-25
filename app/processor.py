@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 
 MODEL_IMAGE_SIZE = (1024, 1024)
@@ -286,3 +287,170 @@ def generate_operational_insights(
             )
 
     return insights
+
+
+def _tile_positions(length: int, tile_size: int, stride: int) -> list[int]:
+    if length <= tile_size:
+        return [0]
+
+    positions = list(range(0, max(length - tile_size, 0) + 1, stride))
+    last_start = max(length - tile_size, 0)
+    if not positions or positions[-1] != last_start:
+        positions.append(last_start)
+    return positions
+
+
+def _edge_weight_mask(height: int, width: int) -> np.ndarray:
+    row = np.linspace(0.1, 1.0, num=max(height, 2), dtype=np.float32)
+    row = np.minimum(row, row[::-1])
+    row = np.clip(row, 0.18, 1.0)
+
+    col = np.linspace(0.1, 1.0, num=max(width, 2), dtype=np.float32)
+    col = np.minimum(col, col[::-1])
+    col = np.clip(col, 0.18, 1.0)
+
+    return np.outer(row[:height], col[:width]).astype(np.float32)
+
+
+def _run_network_on_image(
+    image: Image.Image,
+    network: torch.nn.Module,
+    device: torch.device,
+) -> tuple[np.ndarray, np.ndarray]:
+    input_tensor = preprocess(image).to(device)
+    with torch.inference_mode():
+        output = network(input_tensor)
+        probs = torch.softmax(output, dim=1)
+
+    resized_probs = F.interpolate(
+        probs,
+        size=(image.height, image.width),
+        mode="bilinear",
+        align_corners=False,
+    ).squeeze(0).cpu().numpy()
+
+    class_mask = np.argmax(resized_probs, axis=0).astype(np.uint8)
+    conf_map = np.max(resized_probs, axis=0).astype(np.float32)
+    return class_mask, conf_map
+
+
+def run_single_inference(
+    image: Image.Image,
+    network: torch.nn.Module,
+    device: torch.device,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    class_mask, conf_map = _run_network_on_image(image, network, device)
+    metadata = {
+        "mode": "single",
+        "tile_size": MODEL_IMAGE_SIZE[0],
+        "tile_overlap": 0,
+        "tile_count": 1,
+        "stride": MODEL_IMAGE_SIZE[0],
+    }
+    return class_mask, conf_map, metadata
+
+
+def run_tiled_inference(
+    image: Image.Image,
+    network: torch.nn.Module,
+    device: torch.device,
+    tile_size: int = 1024,
+    tile_overlap: int = 160,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    if tile_size < 256:
+        raise ValueError("Tile size must be at least 256 pixels.")
+    if tile_overlap < 0:
+        raise ValueError("Tile overlap cannot be negative.")
+    if tile_overlap >= tile_size:
+        raise ValueError("Tile overlap must be smaller than tile size.")
+
+    width, height = image.size
+    stride = max(tile_size - tile_overlap, 1)
+    x_positions = _tile_positions(width, tile_size, stride)
+    y_positions = _tile_positions(height, tile_size, stride)
+
+    class_map = np.zeros((height, width), dtype=np.uint8)
+    conf_map = np.zeros((height, width), dtype=np.float32)
+    score_map = np.full((height, width), -1.0, dtype=np.float32)
+
+    tile_count = 0
+    for top in y_positions:
+        for left in x_positions:
+            right = min(left + tile_size, width)
+            bottom = min(top + tile_size, height)
+            tile = image.crop((left, top, right, bottom))
+            tile_mask, tile_conf = _run_network_on_image(tile, network, device)
+            weight = _edge_weight_mask(tile.height, tile.width)
+            weighted_score = tile_conf * weight
+
+            current_scores = score_map[top:bottom, left:right]
+            update_mask = weighted_score > current_scores
+            current_scores[update_mask] = weighted_score[update_mask]
+            conf_map[top:bottom, left:right][update_mask] = tile_conf[update_mask]
+            class_map[top:bottom, left:right][update_mask] = tile_mask[update_mask]
+            tile_count += 1
+
+    metadata = {
+        "mode": "tiled",
+        "tile_size": tile_size,
+        "tile_overlap": tile_overlap,
+        "tile_count": tile_count,
+        "stride": stride,
+    }
+    return class_map, conf_map, metadata
+
+
+def run_segmentation(
+    image: Image.Image,
+    network: torch.nn.Module,
+    device: torch.device,
+    *,
+    tile_size: int = 1024,
+    tile_overlap: int = 160,
+    force_tiled: bool = False,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    width, height = image.size
+    use_tiled = force_tiled or width > tile_size or height > tile_size
+    if use_tiled:
+        return run_tiled_inference(
+            image,
+            network,
+            device,
+            tile_size=tile_size,
+            tile_overlap=tile_overlap,
+        )
+    return run_single_inference(image, network, device)
+
+
+def summarize_review(
+    original_mask: np.ndarray,
+    reviewed_mask: np.ndarray,
+    confidence_map: np.ndarray | None = None,
+    low_conf_threshold: float = 0.6,
+) -> dict[str, Any]:
+    if original_mask.shape != reviewed_mask.shape:
+        raise ValueError("Original and reviewed masks must have the same shape.")
+
+    changed = original_mask != reviewed_mask
+    edited_pixels = int(np.sum(changed))
+    total_pixels = int(original_mask.size)
+
+    touched_class_ids = np.unique(reviewed_mask[changed]).tolist() if edited_pixels else []
+    touched_classes = [CLASS_NAMES[class_id] for class_id in touched_class_ids]
+
+    summary: dict[str, Any] = {
+        "edited_pixels": edited_pixels,
+        "edited_percentage": round(edited_pixels / total_pixels * 100, 2) if total_pixels else 0.0,
+        "touched_classes": touched_classes,
+        "corrected_stats": compute_stats(reviewed_mask),
+    }
+
+    if confidence_map is not None:
+        low_conf_mask = confidence_map < low_conf_threshold
+        low_conf_edited = int(np.sum(np.logical_and(changed, low_conf_mask)))
+        summary["low_confidence_edited_pixels"] = low_conf_edited
+        summary["low_confidence_edited_percentage"] = (
+            round(low_conf_edited / edited_pixels * 100, 2) if edited_pixels else 0.0
+        )
+
+    return summary
