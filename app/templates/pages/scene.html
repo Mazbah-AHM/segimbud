@@ -1,0 +1,193 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<section class="workspace workspace--scene">
+    <aside class="panel console">
+        <div class="section-head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Scene Analysis</p>
+                <h1 class="section-title">Single-scene segmentation</h1>
+                <p class="section-subtitle">Load one image, inspect the mask, and export a report without leaving the workspace.</p>
+            </div>
+        </div>
+
+        <form id="scene-form" class="console__form">
+            <div class="field">
+                <label class="field__label" for="scene-file">Source image</label>
+                <input type="file" id="scene-file" class="field__input" accept=".png,.jpg,.jpeg,.tif,.tiff" required>
+                <div class="field__help">The scene stays visible while inference runs, so you can confirm the selected frame before the result comes back.</div>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="scene-resolution">Resolution (m/px)</label>
+                <input type="number" id="scene-resolution" class="field__input" value="0.5" step="0.1" min="0">
+                <div class="field__help">Enter meters per pixel to unlock per-class and total area estimates.</div>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="scene-overlay-alpha">Overlay opacity</label>
+                <input type="range" id="scene-overlay-alpha" class="field__input" min="0.1" max="0.9" step="0.01" value="0.55">
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="scene-confidence-threshold">Low-confidence threshold</label>
+                <input type="range" id="scene-confidence-threshold" class="field__input" min="0.1" max="0.95" step="0.01" value="0.6">
+            </div>
+
+            <div class="field">
+                <div class="field__label-row">
+                    <label class="field__label">Visible classes</label>
+                    <button type="button" class="field__hint-button" id="scene-select-all">Select all</button>
+                </div>
+                <div id="scene-class-toggles" class="toggle-matrix"></div>
+            </div>
+
+            <div class="action-stack">
+                <button type="submit" class="primary-button" id="scene-run-button">Run inference</button>
+                <button type="button" class="secondary-button" id="scene-reset-button">Reset workspace</button>
+            </div>
+        </form>
+
+        <section class="stack" aria-label="Runtime stack">
+            <div class="section-head" style="margin-top: 1rem; margin-bottom: 0.7rem;">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Runtime</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Session status</h2>
+                </div>
+            </div>
+            <div id="scene-runtime-stack" class="runtime-stack"></div>
+        </section>
+    </aside>
+
+    <section class="panel stage">
+        <div class="section-head stage__head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Main stage</p>
+                <h2 class="section-title">Operational lens</h2>
+                <p class="section-subtitle">Switch between raw image, mask, overlay, confidence, and low-confidence focus.</p>
+            </div>
+            <div id="scene-run-status" class="status-line">Waiting for scene upload.</div>
+        </div>
+
+        <div class="stage__toolbar">
+            <div id="scene-view-switcher" class="segmented-control" aria-label="Scene views">
+                <button type="button" class="is-active" data-view="original">Original</button>
+                <button type="button" data-view="mask">Mask</button>
+                <button type="button" data-view="overlay">Overlay</button>
+                <button type="button" data-view="confidence">Confidence</button>
+                <button type="button" data-view="uncertainty">Uncertainty</button>
+            </div>
+        </div>
+
+        <div class="stage__body">
+            <div class="viewport">
+                <img id="scene-stage-image" class="stage-image" alt="Scene analysis viewport">
+                <div id="scene-empty-state" class="viewport__empty">
+                    <div class="viewport__empty-title">No scene loaded</div>
+                    <div>Upload an image to start the segmentation workflow.</div>
+                </div>
+            </div>
+
+            <aside class="rail-stack">
+                <div class="runtime-card">
+                    <div class="runtime-card__label">Active lens</div>
+                    <div id="scene-stage-label" class="runtime-card__value">Original view</div>
+                </div>
+
+                <div class="preview-stack">
+                    <article class="preview-card">
+                        <div class="preview-card__title">Original</div>
+                        <div class="preview-frame">
+                            <img id="scene-preview-original" class="preview-image" alt="Original scene preview">
+                        </div>
+                    </article>
+                    <article class="preview-card">
+                        <div class="preview-card__title">Mask</div>
+                        <div class="preview-frame">
+                            <img id="scene-preview-mask" class="preview-image" alt="Scene mask preview">
+                        </div>
+                    </article>
+                    <article class="preview-card">
+                        <div class="preview-card__title">Confidence</div>
+                        <div class="preview-frame">
+                            <img id="scene-preview-confidence" class="preview-image" alt="Confidence heatmap preview">
+                        </div>
+                    </article>
+                </div>
+            </aside>
+        </div>
+
+        <div id="scene-metrics-ribbon" class="metrics-ribbon" aria-live="polite"></div>
+    </section>
+
+    <aside class="inspector">
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Coverage estimate</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Area summary</h2>
+                </div>
+            </div>
+            <div id="scene-area-summary" class="runtime-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Interpretation</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Operational insights</h2>
+                </div>
+            </div>
+            <div id="scene-insights" class="insight-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Exports</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Deliverables</h2>
+                </div>
+            </div>
+            <div class="export-grid">
+                <button type="button" class="primary-button" id="scene-download-report" disabled>Download PDF report</button>
+                <button type="button" class="export-button" id="scene-download-mask" disabled>Download mask PNG</button>
+                <button type="button" class="export-button" id="scene-download-class-mask" disabled>Download class mask PNG</button>
+                <button type="button" class="export-button" id="scene-download-heatmap" disabled>Download heatmap PNG</button>
+                <button type="button" class="export-button" id="scene-download-stats" disabled>Download stats CSV</button>
+            </div>
+        </section>
+    </aside>
+
+    <section class="panel datawell">
+        <div class="section-head datawell__header">
+            <div class="section-head__copy">
+                <p class="eyebrow">Class intelligence</p>
+                <h2 class="section-title">Distribution and legend</h2>
+                <p class="section-subtitle">Every class is tracked with percentage, pixel count, and area when scale is available.</p>
+            </div>
+        </div>
+
+        <div class="datawell__grid">
+            <div class="stack">
+                <div class="section-head">
+                    <div class="section-head__copy">
+                        <p class="eyebrow">Legend</p>
+                        <h3 class="section-title" style="font-size: 1rem;">Class palette</h3>
+                    </div>
+                </div>
+                <div id="scene-legend" class="legend-list"></div>
+            </div>
+
+            <div class="stack">
+                <div class="section-head">
+                    <div class="section-head__copy">
+                        <p class="eyebrow">Stats</p>
+                        <h3 class="section-title" style="font-size: 1rem;">Per-class coverage</h3>
+                    </div>
+                </div>
+                <div id="scene-stats-grid" class="stats-grid"></div>
+            </div>
+        </div>
+    </section>
+</section>
+{% endblock %}

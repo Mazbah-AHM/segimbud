@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }} | SegImBud</title>
+    <meta name="description" content="{{ page_description }}">
+    <link rel="stylesheet" href="{{ request.url_for('static', path='css/base.css') }}">
+    {% for style_path in page_styles %}
+    <link rel="stylesheet" href="{{ request.url_for('static', path=style_path) }}">
+    {% endfor %}
+</head>
+<body class="app-body page-{{ active_page }}">
+    {% include "partials/topbar.html" %}
+    <main class="app-shell">
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+        window.SEGIMBUD_CONFIG = {{ page_config | tojson }};
+    </script>
+    {% for script_path in page_scripts %}
+    <script type="module" src="{{ request.url_for('static', path=script_path) }}"></script>
+    {% endfor %}
+</body>
+</html>

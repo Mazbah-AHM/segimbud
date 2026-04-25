@@ -1,0 +1,168 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<section class="workspace workspace--change">
+    <aside class="panel console">
+        <div class="section-head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Change Detection</p>
+                <h1 class="section-title">Bi-temporal comparison</h1>
+                <p class="section-subtitle">Load the baseline and comparison scenes, then inspect class transitions, deltas, and report-ready outputs.</p>
+            </div>
+        </div>
+
+        <form id="change-form" class="console__form">
+            <div class="field">
+                <label class="field__label" for="change-before-file">Baseline image</label>
+                <input type="file" id="change-before-file" class="field__input" accept=".png,.jpg,.jpeg,.tif,.tiff" required>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="change-after-file">Comparison image</label>
+                <input type="file" id="change-after-file" class="field__input" accept=".png,.jpg,.jpeg,.tif,.tiff" required>
+                <div class="field__help">Both previews stay visible while the change model runs, so the workspace does not blank out mid-process.</div>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="change-resolution">Resolution (m/px)</label>
+                <input type="number" id="change-resolution" class="field__input" value="0.5" step="0.1" min="0">
+                <div class="field__help">Enter meters per pixel to quantify changed area and per-class area deltas.</div>
+            </div>
+
+            <div class="field">
+                <label class="field__label" for="change-overlay-alpha">Overlay opacity</label>
+                <input type="range" id="change-overlay-alpha" class="field__input" min="0.1" max="0.9" step="0.01" value="0.58">
+            </div>
+
+            <div class="field">
+                <div class="field__label-row">
+                    <label class="field__label">Visible classes</label>
+                    <button type="button" class="field__hint-button" id="change-select-all">Select all</button>
+                </div>
+                <div id="change-class-toggles" class="toggle-matrix"></div>
+            </div>
+
+            <div class="action-stack">
+                <button type="submit" class="primary-button" id="change-run-button">Run change detection</button>
+                <button type="button" class="secondary-button" id="change-reset-button">Reset workspace</button>
+            </div>
+        </form>
+    </aside>
+
+    <section class="panel stage">
+        <div class="section-head stage__head">
+            <div class="section-head__copy">
+                <p class="eyebrow">Main stage</p>
+                <h2 class="section-title">Change map</h2>
+                <p class="section-subtitle">Use the stage to switch between the change mask and each scene's overlay or confidence view.</p>
+            </div>
+            <div id="change-run-status" class="status-line">Waiting for comparison pair.</div>
+        </div>
+
+        <div class="stage__toolbar">
+            <div id="change-view-switcher" class="segmented-control" aria-label="Change views">
+                <button type="button" class="is-active" data-view="change">Change mask</button>
+                <button type="button" data-view="before-overlay">Before overlay</button>
+                <button type="button" data-view="after-overlay">After overlay</button>
+                <button type="button" data-view="before-confidence">Before confidence</button>
+                <button type="button" data-view="after-confidence">After confidence</button>
+            </div>
+        </div>
+
+        <div class="change-stage__layout">
+            <aside class="preview-stack">
+                <article class="preview-card">
+                    <div class="preview-card__title">Baseline</div>
+                    <div class="preview-frame">
+                        <img id="change-preview-before" class="preview-image" alt="Baseline scene preview">
+                    </div>
+                </article>
+            </aside>
+
+            <div class="stack">
+                <div class="viewport viewport--change">
+                    <img id="change-stage-image" class="stage-image" alt="Change detection viewport">
+                    <div id="change-empty-state" class="viewport__empty">
+                        <div class="viewport__empty-title">No comparison loaded</div>
+                        <div>Upload both scenes to populate the change board.</div>
+                    </div>
+                </div>
+
+                <div class="runtime-card">
+                    <div class="runtime-card__label">Active lens</div>
+                    <div id="change-stage-label" class="runtime-card__value">Change mask</div>
+                </div>
+            </div>
+
+            <aside class="preview-stack">
+                <article class="preview-card">
+                    <div class="preview-card__title">Comparison</div>
+                    <div class="preview-frame">
+                        <img id="change-preview-after" class="preview-image" alt="Comparison scene preview">
+                    </div>
+                </article>
+            </aside>
+        </div>
+
+        <div id="change-metrics-ribbon" class="metrics-ribbon" aria-live="polite"></div>
+    </section>
+
+    <aside class="inspector">
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Area summary</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Change footprint</h2>
+                </div>
+            </div>
+            <div id="change-area-summary" class="runtime-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Transitions</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Top class shifts</h2>
+                </div>
+            </div>
+            <div id="change-transitions" class="transition-list"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Interpretation</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Operational insights</h2>
+                </div>
+            </div>
+            <div id="change-insights" class="insight-stack"></div>
+        </section>
+
+        <section class="panel">
+            <div class="section-head">
+                <div class="section-head__copy">
+                    <p class="eyebrow">Exports</p>
+                    <h2 class="section-title" style="font-size: 1rem;">Deliverables</h2>
+                </div>
+            </div>
+            <div class="export-grid">
+                <button type="button" class="primary-button" id="change-download-report" disabled>Download PDF report</button>
+                <button type="button" class="export-button" id="change-download-mask" disabled>Download change mask PNG</button>
+                <button type="button" class="export-button" id="change-download-transitions" disabled>Download transitions CSV</button>
+                <button type="button" class="export-button" id="change-download-delta" disabled>Download class delta CSV</button>
+            </div>
+        </section>
+    </aside>
+
+    <section class="panel datawell">
+        <div class="section-head datawell__header">
+            <div class="section-head__copy">
+                <p class="eyebrow">Delta intelligence</p>
+                <h2 class="section-title">Per-class change board</h2>
+                <p class="section-subtitle">Track where coverage increased or decreased for every class in the comparison pair.</p>
+            </div>
+        </div>
+        <div id="change-delta-grid" class="stats-grid"></div>
+    </section>
+</section>
+{% endblock %}

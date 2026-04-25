@@ -1,0 +1,20 @@
+<header class="topbar">
+    <div class="topbar__brand">
+        <a class="brand-mark" href="/scene">
+            <span class="brand-mark__text">SEGIMBUD</span>
+        </a>
+    </div>
+    
+    <nav class="topbar__nav">
+        {% for item in nav_items %}
+        <a class="nav-link {% if item.id == active_page %}is-active{% endif %}" href="{{ item.href }}">
+            {{ item.label }}
+        </a>
+        {% endfor %}
+    </nav>
+
+    <div class="topbar__meta">
+        <div id="global-health-pill" class="health-pill">SYSTEM ONLINE</div>
+        <a href="/docs" class="docs-link" target="_blank">API DOCS</a>
+    </div>
+</header>
